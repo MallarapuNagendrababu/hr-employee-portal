@@ -58,6 +58,18 @@ export async function initializeDatabase(): Promise<void> {
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
       )
     `);
+    await connection.query(`
+      CREATE TABLE IF NOT EXISTS \`payroll\` (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        employee_id VARCHAR(20) NOT NULL,
+        payroll_month VARCHAR(7) NOT NULL,
+        basic_salary DECIMAL(12, 2) NOT NULL,
+        allowances DECIMAL(12, 2) NOT NULL,
+        deductions DECIMAL(12, 2) NOT NULL,
+        net_salary DECIMAL(12, 2) NOT NULL,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      )
+    `);
   } finally {
     connection.release();
   }

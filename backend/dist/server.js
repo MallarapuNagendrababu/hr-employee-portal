@@ -209,14 +209,25 @@ app.delete('/api/leaves/:id', async (req, res) => {
         return res.status(500).json({ message: 'Database error' });
     }
 });
+async function getAttendanceEmployeeColumn() {
+    const [rows] = await db_1.dbPool.query('SHOW COLUMNS FROM attendance');
+    const columns = Array.isArray(rows) ? rows.map((column) => column.Field) : [];
+    return columns.includes('emp_id') ? 'emp_id' : 'employee_id';
+}
+async function getPayrollIdColumn() {
+    const [rows] = await db_1.dbPool.query('SHOW COLUMNS FROM payroll');
+    const columns = Array.isArray(rows) ? rows.map((column) => column.Field) : [];
+    return columns.includes('id') ? 'id' : 'payroll_id';
+}
 app.get('/api/attendance', async (_req, res) => {
     try {
+        const idColumn = await getAttendanceEmployeeColumn();
         const [rows] = await db_1.dbPool.query(`
       SELECT *
       FROM attendance
       ORDER BY
-        CASE WHEN emp_id >= 101 THEN 0 ELSE 1 END,
-        emp_id ASC,
+        CASE WHEN CAST(${idColumn} AS UNSIGNED) >= 101 THEN 0 ELSE 1 END,
+        CAST(${idColumn} AS UNSIGNED) ASC,
         attendance_date DESC
       `);
         return res.json({ message: 'Attendance fetched successfully', data: rows });
@@ -227,16 +238,18 @@ app.get('/api/attendance', async (_req, res) => {
     }
 });
 app.post('/api/attendance', async (req, res) => {
-    const { emp_id, attendance_date, check_in_time, check_out_time } = req.body ?? {};
-    if (!emp_id || !attendance_date || !check_in_time || !check_out_time) {
+    const { emp_id, employee_id, attendance_date, check_in_time, check_out_time } = req.body ?? {};
+    const resolvedEmployeeId = emp_id ?? employee_id;
+    if (!resolvedEmployeeId || !attendance_date || !check_in_time || !check_out_time) {
         return res.status(400).json({ message: 'Missing required attendance fields' });
     }
     try {
+        const idColumn = await getAttendanceEmployeeColumn();
         await db_1.dbPool.query(`
-      INSERT INTO attendance (emp_id, attendance_date, check_in_time, check_out_time, working_hours)
+      INSERT INTO attendance (${idColumn}, attendance_date, check_in_time, check_out_time, working_hours)
       VALUES (?, ?, ?, ?, TIMEDIFF(?, ?))
-      `, [emp_id, attendance_date, check_in_time, check_out_time, check_out_time, check_in_time]);
-        const [rows] = await db_1.dbPool.query('SELECT * FROM attendance WHERE emp_id = ? AND attendance_date = ?', [emp_id, attendance_date]);
+      `, [resolvedEmployeeId, attendance_date, check_in_time, check_out_time, check_out_time, check_in_time]);
+        const [rows] = await db_1.dbPool.query(`SELECT * FROM attendance WHERE ${idColumn} = ? AND attendance_date = ?`, [resolvedEmployeeId, attendance_date]);
         const created = Array.isArray(rows) ? rows[0] : rows;
         return res.status(201).json({ message: 'Attendance created successfully', data: created });
     }
@@ -248,17 +261,19 @@ app.post('/api/attendance', async (req, res) => {
 app.put('/api/attendance/:id', async (req, res) => {
     const { id } = req.params;
     const [previousEmpId, previousAttendanceDate] = String(id).split('__');
-    const { emp_id, attendance_date, check_in_time, check_out_time } = req.body ?? {};
-    if (!previousEmpId || !previousAttendanceDate || !emp_id || !attendance_date || !check_in_time || !check_out_time) {
+    const { emp_id, employee_id, attendance_date, check_in_time, check_out_time } = req.body ?? {};
+    const resolvedEmployeeId = emp_id ?? employee_id;
+    if (!previousEmpId || !previousAttendanceDate || !resolvedEmployeeId || !attendance_date || !check_in_time || !check_out_time) {
         return res.status(400).json({ message: 'Missing required attendance fields' });
     }
     try {
+        const idColumn = await getAttendanceEmployeeColumn();
         const [result] = await db_1.dbPool.query(`
       UPDATE attendance
-      SET emp_id = ?, attendance_date = ?, check_in_time = ?, check_out_time = ?, working_hours = TIMEDIFF(?, ?)
-      WHERE emp_id = ? AND attendance_date = ?
+      SET ${idColumn} = ?, attendance_date = ?, check_in_time = ?, check_out_time = ?, working_hours = TIMEDIFF(?, ?)
+      WHERE ${idColumn} = ? AND attendance_date = ?
       `, [
-            emp_id,
+            resolvedEmployeeId,
             attendance_date,
             check_in_time,
             check_out_time,
@@ -284,7 +299,8 @@ app.delete('/api/attendance/:id', async (req, res) => {
         return res.status(400).json({ message: 'Invalid attendance id format' });
     }
     try {
-        const [result] = await db_1.dbPool.query('DELETE FROM attendance WHERE emp_id = ? AND attendance_date = ?', [empId, attendanceDate]);
+        const idColumn = await getAttendanceEmployeeColumn();
+        const [result] = await db_1.dbPool.query(`DELETE FROM attendance WHERE ${idColumn} = ? AND attendance_date = ?`, [empId, attendanceDate]);
         if (!result.affectedRows) {
             return res.status(404).json({ message: 'Attendance record not found' });
         }
@@ -295,152 +311,574 @@ app.delete('/api/attendance/:id', async (req, res) => {
         return res.status(500).json({ message: 'Database error' });
     }
 });
+// app.get('/api/payroll', async (_req: any, res: any) => {
+//   try {
+//     const payrollIdColumn = await getPayrollIdColumn();
+//     const [rows] = await dbPool.query(`SELECT * FROM payroll ORDER BY ${payrollIdColumn} DESC`);
+//     return res.json({ message: 'Payroll fetched successfully', data: rows });
+//   } catch (error: any) {
+//     if (error?.code === 'ER_NO_SUCH_TABLE') {
+//       try {
+//         await initializeDatabase();
+//         const payrollIdColumn = await getPayrollIdColumn();
+//         const [rows] = await dbPool.query(`SELECT * FROM payroll ORDER BY ${payrollIdColumn} DESC`);
+//         return res.json({ message: 'Payroll fetched successfully', data: rows });
+//       } catch (retryError) {
+//         console.error(retryError);
+//         return res.status(500).json({ message: 'Database error' });
+//       }
+//     }
+//     console.error(error);
+//     return res.status(500).json({ message: 'Database error' });
+//   }
+// });
+// app.post('/api/payroll', async (req: any, res: any) => {
+//   const {
+//     employee_id,
+//     payroll_month,
+//     basic_salary,
+//     allowances,
+//     deductions,
+//     net_salary
+//   } = req.body ?? {};
+//   if (
+//     !employee_id ||
+//     !payroll_month ||
+//     basic_salary === undefined ||
+//     allowances === undefined ||
+//     deductions === undefined ||
+//     net_salary === undefined
+//   ) {
+//     return res.status(400).json({ message: 'Missing required payroll fields' });
+//   }
+//   const parsedBasicSalary = Number(basic_salary);
+//   const parsedAllowances = Number(allowances);
+//   const parsedDeductions = Number(deductions);
+//   const parsedNetSalary = Number(net_salary);
+//   if (
+//     !Number.isFinite(parsedBasicSalary) ||
+//     !Number.isFinite(parsedAllowances) ||
+//     !Number.isFinite(parsedDeductions) ||
+//     !Number.isFinite(parsedNetSalary)
+//   ) {
+//     return res.status(400).json({ message: 'Payroll amount fields must be valid numbers' });
+//   }
+//   if (!/^\d{4}-\d{2}$/.test(String(payroll_month))) {
+//     return res.status(400).json({ message: 'payroll_month must be in YYYY-MM format' });
+//   }
+//   try {
+//     const payrollIdColumn = await getPayrollIdColumn();
+//     const [result] = await dbPool.query(
+//       `
+//       INSERT INTO payroll (employee_id, payroll_month, basic_salary, allowances, deductions, net_salary)
+//       VALUES (?, ?, ?, ?, ?, ?)
+//       `,
+//       [employee_id, payroll_month, parsedBasicSalary, parsedAllowances, parsedDeductions, parsedNetSalary]
+//     );
+//     const insertId = (result as any).insertId;
+//     const [rows] = await dbPool.query(`SELECT * FROM payroll WHERE ${payrollIdColumn} = ?`, [insertId]);
+//     const created = Array.isArray(rows) ? rows[0] : (rows as any);
+//     return res.status(201).json({ message: 'Payroll created successfully', data: created });
+//   } catch (error: any) {
+//     if (error?.code === 'ER_NO_SUCH_TABLE') {
+//       try {
+//         await initializeDatabase();
+//         const payrollIdColumn = await getPayrollIdColumn();
+//         const [result] = await dbPool.query(
+//           `
+//           INSERT INTO payroll (employee_id, payroll_month, basic_salary, allowances, deductions, net_salary)
+//           VALUES (?, ?, ?, ?, ?, ?)
+//           `,
+//           [employee_id, payroll_month, parsedBasicSalary, parsedAllowances, parsedDeductions, parsedNetSalary]
+//         );
+//         const insertId = (result as any).insertId;
+//         const [rows] = await dbPool.query(`SELECT * FROM payroll WHERE ${payrollIdColumn} = ?`, [insertId]);
+//         const created = Array.isArray(rows) ? rows[0] : (rows as any);
+//         return res.status(201).json({ message: 'Payroll created successfully', data: created });
+//       } catch (retryError) {
+//         console.error(retryError);
+//         return res.status(500).json({ message: 'Database error' });
+//       }
+//     }
+//     console.error(error);
+//     return res.status(500).json({ message: 'Database error' });
+//   }
+// });
+// app.put('/api/payroll/:id', async (req: any, res: any) => {
+//   const { id } = req.params;
+//   const {
+//     employee_id,
+//     payroll_month,
+//     basic_salary,
+//     allowances,
+//     deductions,
+//     net_salary
+//   } = req.body ?? {};
+//   if (
+//     !employee_id ||
+//     !payroll_month ||
+//     basic_salary === undefined ||
+//     allowances === undefined ||
+//     deductions === undefined ||
+//     net_salary === undefined
+//   ) {
+//     return res.status(400).json({ message: 'Missing required payroll fields' });
+//   }
+//   const parsedBasicSalary = Number(basic_salary);
+//   const parsedAllowances = Number(allowances);
+//   const parsedDeductions = Number(deductions);
+//   const parsedNetSalary = Number(net_salary);
+//   if (
+//     !Number.isFinite(parsedBasicSalary) ||
+//     !Number.isFinite(parsedAllowances) ||
+//     !Number.isFinite(parsedDeductions) ||
+//     !Number.isFinite(parsedNetSalary)
+//   ) {
+//     return res.status(400).json({ message: 'Payroll amount fields must be valid numbers' });
+//   }
+//   if (!/^\d{4}-\d{2}$/.test(String(payroll_month))) {
+//     return res.status(400).json({ message: 'payroll_month must be in YYYY-MM format' });
+//   }
+//   try {
+//     const payrollIdColumn = await getPayrollIdColumn();
+//     const [result] = await dbPool.query(
+//       `
+//       UPDATE payroll
+//       SET employee_id = ?, payroll_month = ?, basic_salary = ?, allowances = ?, deductions = ?, net_salary = ?
+//       WHERE ${payrollIdColumn} = ?
+//       `,
+//       [employee_id, payroll_month, parsedBasicSalary, parsedAllowances, parsedDeductions, parsedNetSalary, id]
+//     );
+//     if (!(result as any).affectedRows) {
+//       return res.status(404).json({ message: 'Payroll record not found' });
+//     }
+//     return res.json({ message: 'Payroll updated successfully' });
+//   } catch (error: any) {
+//     if (error?.code === 'ER_NO_SUCH_TABLE') {
+//       try {
+//         await initializeDatabase();
+//         const payrollIdColumn = await getPayrollIdColumn();
+//         const [retryResult] = await dbPool.query(
+//           `
+//           UPDATE payroll
+//           SET employee_id = ?, payroll_month = ?, basic_salary = ?, allowances = ?, deductions = ?, net_salary = ?
+//           WHERE ${payrollIdColumn} = ?
+//           `,
+//           [employee_id, payroll_month, parsedBasicSalary, parsedAllowances, parsedDeductions, parsedNetSalary, id]
+//         );
+//         if (!(retryResult as any).affectedRows) {
+//           return res.status(404).json({ message: 'Payroll record not found' });
+//         }
+//         return res.json({ message: 'Payroll updated successfully' });
+//       } catch (retryError) {
+//         console.error(retryError);
+//         return res.status(500).json({ message: 'Database error' });
+//       }
+//     }
+//     console.error(error);
+//     return res.status(500).json({ message: 'Database error' });
+//   }
+// });
+// app.delete('/api/payroll/:id', async (req: any, res: any) => {
+//   const { id } = req.params;
+//   try {
+//     const payrollIdColumn = await getPayrollIdColumn();
+//     const [result] = await dbPool.query(`DELETE FROM payroll WHERE ${payrollIdColumn} = ?`, [id]);
+//     if (!(result as any).affectedRows) {
+//       return res.status(404).json({ message: 'Payroll record not found' });
+//     }
+//     return res.json({ message: 'Payroll deleted successfully' });
+//   } catch (error) {
+//     console.error(error);
+//     return res.status(500).json({ message: 'Database error' });
+//   }
+// });
+// ============================================================
+// PAYROLL API
+// ============================================================
+// GET ALL PAYROLL
 app.get('/api/payroll', async (_req, res) => {
     try {
-        const [rows] = await db_1.dbPool.query('SELECT * FROM payroll ORDER BY id DESC');
-        return res.json({ message: 'Payroll fetched successfully', data: rows });
+        const [rows] = await db_1.dbPool.query(`
+      SELECT
+        emp_id,
+        payroll_month,
+        basic_salary,
+        allowances,
+        deductions,
+        net_salary
+      FROM payroll
+      ORDER BY emp_id DESC
+    `);
+        return res.status(200).json({
+            message: 'Payroll records fetched successfully',
+            data: rows
+        });
     }
     catch (error) {
+        console.error('GET /api/payroll error:', error);
         if (error?.code === 'ER_NO_SUCH_TABLE') {
-            try {
-                await (0, db_1.initializeDatabase)();
-                const [rows] = await db_1.dbPool.query('SELECT * FROM payroll ORDER BY id DESC');
-                return res.json({ message: 'Payroll fetched successfully', data: rows });
-            }
-            catch (retryError) {
-                console.error(retryError);
-                return res.status(500).json({ message: 'Database error' });
-            }
+            return res.status(404).json({
+                message: 'Payroll table does not exist'
+            });
         }
-        console.error(error);
-        return res.status(500).json({ message: 'Database error' });
+        return res.status(500).json({
+            message: 'Database error',
+            error: error?.message || 'Unknown database error'
+        });
     }
 });
+// GET SINGLE PAYROLL
+app.get('/api/payroll/:id', async (req, res) => {
+    const { id } = req.params;
+    const empId = Number(id);
+    if (!Number.isInteger(empId)) {
+        return res.status(400).json({
+            message: 'Invalid employee ID'
+        });
+    }
+    try {
+        const [rows] = await db_1.dbPool.query(`
+      SELECT
+        emp_id,
+        payroll_month,
+        basic_salary,
+        allowances,
+        deductions,
+        net_salary
+      FROM payroll
+      WHERE emp_id = ?
+      `, [empId]);
+        const data = Array.isArray(rows) ? rows : [];
+        if (data.length === 0) {
+            return res.status(404).json({
+                message: 'Payroll record not found'
+            });
+        }
+        return res.status(200).json({
+            message: 'Payroll record fetched successfully',
+            data: data[0]
+        });
+    }
+    catch (error) {
+        console.error('GET /api/payroll/:id error:', error);
+        return res.status(500).json({
+            message: 'Database error',
+            error: error?.message || 'Unknown database error'
+        });
+    }
+});
+// CREATE PAYROLL
 app.post('/api/payroll', async (req, res) => {
-    const { employee_id, payroll_month, basic_salary, allowances, deductions, net_salary } = req.body ?? {};
-    if (!employee_id ||
+    const { emp_id, payroll_month, basic_salary, allowances = 0, deductions = 0, net_salary } = req.body ?? {};
+    // ------------------------------------------
+    // Required field validation
+    // ------------------------------------------
+    if (emp_id === undefined ||
+        emp_id === null ||
+        emp_id === '' ||
         !payroll_month ||
         basic_salary === undefined ||
-        allowances === undefined ||
-        deductions === undefined ||
         net_salary === undefined) {
-        return res.status(400).json({ message: 'Missing required payroll fields' });
+        return res.status(400).json({
+            message: 'Missing required payroll fields'
+        });
     }
+    // ------------------------------------------
+    // Convert values to numbers
+    // ------------------------------------------
+    const parsedEmpId = Number(emp_id);
     const parsedBasicSalary = Number(basic_salary);
     const parsedAllowances = Number(allowances);
     const parsedDeductions = Number(deductions);
     const parsedNetSalary = Number(net_salary);
-    if (!Number.isFinite(parsedBasicSalary) ||
+    // ------------------------------------------
+    // Number validation
+    // ------------------------------------------
+    if (!Number.isInteger(parsedEmpId) ||
+        !Number.isFinite(parsedBasicSalary) ||
         !Number.isFinite(parsedAllowances) ||
         !Number.isFinite(parsedDeductions) ||
         !Number.isFinite(parsedNetSalary)) {
-        return res.status(400).json({ message: 'Payroll amount fields must be valid numbers' });
+        return res.status(400).json({
+            message: 'Payroll amount fields must be valid numbers'
+        });
     }
-    if (!/^\d{4}-\d{2}$/.test(String(payroll_month))) {
-        return res.status(400).json({ message: 'payroll_month must be in YYYY-MM format' });
+    // ------------------------------------------
+    // Payroll month validation
+    //
+    // Example:
+    // July 2026
+    // August 2026
+    // January 2027
+    // ------------------------------------------
+    if (!/^(January|February|March|April|May|June|July|August|September|October|November|December)\s+\d{4}$/i.test(String(payroll_month))) {
+        return res.status(400).json({
+            message: 'payroll_month must be in format like July 2026'
+        });
     }
     try {
-        const [result] = await db_1.dbPool.query(`
-      INSERT INTO payroll (employee_id, payroll_month, basic_salary, allowances, deductions, net_salary)
+        // ------------------------------------------
+        // Check if employee payroll already exists
+        // ------------------------------------------
+        const [existingRows] = await db_1.dbPool.query(`
+      SELECT emp_id
+      FROM payroll
+      WHERE emp_id = ?
+      `, [parsedEmpId]);
+        if (Array.isArray(existingRows) && existingRows.length > 0) {
+            return res.status(409).json({
+                message: 'Payroll record already exists for this employee'
+            });
+        }
+        // ------------------------------------------
+        // Insert payroll
+        // ------------------------------------------
+        await db_1.dbPool.query(`
+      INSERT INTO payroll
+      (
+        emp_id,
+        payroll_month,
+        basic_salary,
+        allowances,
+        deductions,
+        net_salary
+      )
       VALUES (?, ?, ?, ?, ?, ?)
-      `, [employee_id, payroll_month, parsedBasicSalary, parsedAllowances, parsedDeductions, parsedNetSalary]);
-        const insertId = result.insertId;
-        const [rows] = await db_1.dbPool.query('SELECT * FROM payroll WHERE id = ?', [insertId]);
-        const created = Array.isArray(rows) ? rows[0] : rows;
-        return res.status(201).json({ message: 'Payroll created successfully', data: created });
+      `, [
+            parsedEmpId,
+            String(payroll_month),
+            parsedBasicSalary,
+            parsedAllowances,
+            parsedDeductions,
+            parsedNetSalary
+        ]);
+        // ------------------------------------------
+        // Get created payroll
+        // ------------------------------------------
+        const [rows] = await db_1.dbPool.query(`
+      SELECT
+        emp_id,
+        payroll_month,
+        basic_salary,
+        allowances,
+        deductions,
+        net_salary
+      FROM payroll
+      WHERE emp_id = ?
+      `, [parsedEmpId]);
+        const created = Array.isArray(rows)
+            ? rows[0]
+            : rows;
+        return res.status(201).json({
+            message: 'Payroll created successfully',
+            data: created
+        });
     }
     catch (error) {
+        console.error('POST /api/payroll error:', error);
+        // ------------------------------------------
+        // Table does not exist
+        // ------------------------------------------
         if (error?.code === 'ER_NO_SUCH_TABLE') {
             try {
                 await (0, db_1.initializeDatabase)();
-                const [result] = await db_1.dbPool.query(`
-          INSERT INTO payroll (employee_id, payroll_month, basic_salary, allowances, deductions, net_salary)
+                await db_1.dbPool.query(`
+          INSERT INTO payroll
+          (
+            emp_id,
+            payroll_month,
+            basic_salary,
+            allowances,
+            deductions,
+            net_salary
+          )
           VALUES (?, ?, ?, ?, ?, ?)
-          `, [employee_id, payroll_month, parsedBasicSalary, parsedAllowances, parsedDeductions, parsedNetSalary]);
-                const insertId = result.insertId;
-                const [rows] = await db_1.dbPool.query('SELECT * FROM payroll WHERE id = ?', [insertId]);
-                const created = Array.isArray(rows) ? rows[0] : rows;
-                return res.status(201).json({ message: 'Payroll created successfully', data: created });
+          `, [
+                    parsedEmpId,
+                    String(payroll_month),
+                    parsedBasicSalary,
+                    parsedAllowances,
+                    parsedDeductions,
+                    parsedNetSalary
+                ]);
+                const [rows] = await db_1.dbPool.query(`
+          SELECT
+            emp_id,
+            payroll_month,
+            basic_salary,
+            allowances,
+            deductions,
+            net_salary
+          FROM payroll
+          WHERE emp_id = ?
+          `, [parsedEmpId]);
+                const created = Array.isArray(rows)
+                    ? rows[0]
+                    : rows;
+                return res.status(201).json({
+                    message: 'Payroll created successfully',
+                    data: created
+                });
             }
             catch (retryError) {
-                console.error(retryError);
-                return res.status(500).json({ message: 'Database error' });
+                console.error('POST /api/payroll retry error:', retryError);
+                return res.status(500).json({
+                    message: 'Database error',
+                    error: retryError?.message || 'Unknown database error'
+                });
             }
         }
-        console.error(error);
-        return res.status(500).json({ message: 'Database error' });
+        // ------------------------------------------
+        // Duplicate primary key
+        // ------------------------------------------
+        if (error?.code === 'ER_DUP_ENTRY') {
+            return res.status(409).json({
+                message: 'Payroll record already exists for this employee'
+            });
+        }
+        return res.status(500).json({
+            message: 'Database error',
+            error: error?.message || 'Unknown database error'
+        });
     }
 });
+// UPDATE PAYROLL
 app.put('/api/payroll/:id', async (req, res) => {
     const { id } = req.params;
-    const { employee_id, payroll_month, basic_salary, allowances, deductions, net_salary } = req.body ?? {};
-    if (!employee_id ||
+    const { emp_id, payroll_month, basic_salary, allowances = 0, deductions = 0, net_salary } = req.body ?? {};
+    // ------------------------------------------
+    // Required field validation
+    // ------------------------------------------
+    if (emp_id === undefined ||
+        emp_id === null ||
+        emp_id === '' ||
         !payroll_month ||
         basic_salary === undefined ||
-        allowances === undefined ||
-        deductions === undefined ||
         net_salary === undefined) {
-        return res.status(400).json({ message: 'Missing required payroll fields' });
+        return res.status(400).json({
+            message: 'Missing required payroll fields'
+        });
     }
+    const payrollId = Number(id);
+    const parsedEmpId = Number(emp_id);
     const parsedBasicSalary = Number(basic_salary);
     const parsedAllowances = Number(allowances);
     const parsedDeductions = Number(deductions);
     const parsedNetSalary = Number(net_salary);
-    if (!Number.isFinite(parsedBasicSalary) ||
+    // ------------------------------------------
+    // Number validation
+    // ------------------------------------------
+    if (!Number.isInteger(payrollId) ||
+        !Number.isInteger(parsedEmpId) ||
+        !Number.isFinite(parsedBasicSalary) ||
         !Number.isFinite(parsedAllowances) ||
         !Number.isFinite(parsedDeductions) ||
         !Number.isFinite(parsedNetSalary)) {
-        return res.status(400).json({ message: 'Payroll amount fields must be valid numbers' });
+        return res.status(400).json({
+            message: 'Payroll fields must contain valid numbers'
+        });
     }
-    if (!/^\d{4}-\d{2}$/.test(String(payroll_month))) {
-        return res.status(400).json({ message: 'payroll_month must be in YYYY-MM format' });
+    // ------------------------------------------
+    // Month validation
+    // ------------------------------------------
+    if (!/^(January|February|March|April|May|June|July|August|September|October|November|December)\s+\d{4}$/i.test(String(payroll_month))) {
+        return res.status(400).json({
+            message: 'payroll_month must be in format like July 2026'
+        });
+    }
+    try {
+        // ------------------------------------------
+        // Update payroll
+        // ------------------------------------------
+        const [result] = await db_1.dbPool.query(`
+      UPDATE payroll
+      SET
+        emp_id = ?,
+        payroll_month = ?,
+        basic_salary = ?,
+        allowances = ?,
+        deductions = ?,
+        net_salary = ?
+      WHERE emp_id = ?
+      `, [
+            parsedEmpId,
+            String(payroll_month),
+            parsedBasicSalary,
+            parsedAllowances,
+            parsedDeductions,
+            parsedNetSalary,
+            payrollId
+        ]);
+        if (!result.affectedRows) {
+            return res.status(404).json({
+                message: 'Payroll record not found'
+            });
+        }
+        // ------------------------------------------
+        // Get updated record
+        // ------------------------------------------
+        const [rows] = await db_1.dbPool.query(`
+      SELECT
+        emp_id,
+        payroll_month,
+        basic_salary,
+        allowances,
+        deductions,
+        net_salary
+      FROM payroll
+      WHERE emp_id = ?
+      `, [parsedEmpId]);
+        const updated = Array.isArray(rows)
+            ? rows[0]
+            : rows;
+        return res.status(200).json({
+            message: 'Payroll updated successfully',
+            data: updated
+        });
+    }
+    catch (error) {
+        console.error('PUT /api/payroll/:id error:', error);
+        if (error?.code === 'ER_DUP_ENTRY') {
+            return res.status(409).json({
+                message: 'Another payroll record already uses this employee ID'
+            });
+        }
+        return res.status(500).json({
+            message: 'Database error',
+            error: error?.message || 'Unknown database error'
+        });
+    }
+});
+// DELETE PAYROLL
+app.delete('/api/payroll/:id', async (req, res) => {
+    const { id } = req.params;
+    const empId = Number(id);
+    if (!Number.isInteger(empId)) {
+        return res.status(400).json({
+            message: 'Invalid employee ID'
+        });
     }
     try {
         const [result] = await db_1.dbPool.query(`
-      UPDATE payroll
-      SET employee_id = ?, payroll_month = ?, basic_salary = ?, allowances = ?, deductions = ?, net_salary = ?
-      WHERE id = ?
-      `, [employee_id, payroll_month, parsedBasicSalary, parsedAllowances, parsedDeductions, parsedNetSalary, id]);
+      DELETE FROM payroll
+      WHERE emp_id = ?
+      `, [empId]);
         if (!result.affectedRows) {
-            return res.status(404).json({ message: 'Payroll record not found' });
+            return res.status(404).json({
+                message: 'Payroll record not found'
+            });
         }
-        return res.json({ message: 'Payroll updated successfully' });
+        return res.status(200).json({
+            message: 'Payroll deleted successfully'
+        });
     }
     catch (error) {
-        if (error?.code === 'ER_NO_SUCH_TABLE') {
-            try {
-                await (0, db_1.initializeDatabase)();
-                const [retryResult] = await db_1.dbPool.query(`
-          UPDATE payroll
-          SET employee_id = ?, payroll_month = ?, basic_salary = ?, allowances = ?, deductions = ?, net_salary = ?
-          WHERE id = ?
-          `, [employee_id, payroll_month, parsedBasicSalary, parsedAllowances, parsedDeductions, parsedNetSalary, id]);
-                if (!retryResult.affectedRows) {
-                    return res.status(404).json({ message: 'Payroll record not found' });
-                }
-                return res.json({ message: 'Payroll updated successfully' });
-            }
-            catch (retryError) {
-                console.error(retryError);
-                return res.status(500).json({ message: 'Database error' });
-            }
-        }
-        console.error(error);
-        return res.status(500).json({ message: 'Database error' });
-    }
-});
-app.delete('/api/payroll/:id', async (req, res) => {
-    const { id } = req.params;
-    try {
-        const [result] = await db_1.dbPool.query('DELETE FROM payroll WHERE id = ?', [id]);
-        if (!result.affectedRows) {
-            return res.status(404).json({ message: 'Payroll record not found' });
-        }
-        return res.json({ message: 'Payroll deleted successfully' });
-    }
-    catch (error) {
-        console.error(error);
-        return res.status(500).json({ message: 'Database error' });
+        console.error('DELETE /api/payroll/:id error:', error);
+        return res.status(500).json({
+            message: 'Database error',
+            error: error?.message || 'Unknown database error'
+        });
     }
 });
 app.get('/api/documents', async (_req, res) => {

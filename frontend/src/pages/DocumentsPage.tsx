@@ -141,7 +141,71 @@ export default function DocumentsPage() {
 
   return (
     <section>
-      <style>{`.documents-table{width:100%;border-collapse:collapse;margin-top:20px}.documents-table th,.documents-table td{border:1px solid #ddd;padding:8px;text-align:left}.documents-actions{display:flex;gap:8px}.employee-status{margin-top:12px;font-weight:500}`}</style>
+      <style>{`
+        .documents-table {
+          width: 100%;
+          border-collapse: collapse;
+          margin-top: 20px;
+          background: #f7fcf7;
+          border: 1px solid #4caf50;
+        }
+
+        .documents-table th {
+          border: 1px solid #4caf50;
+          padding: 10px;
+          text-align: left;
+          background: #4caf50;
+          color: #ffffff;
+          font-weight: 700;
+        }
+
+        .documents-table td {
+          border: 1px solid #cfe6dd;
+          padding: 10px;
+          text-align: left;
+          color: #0f172a;
+        }
+
+        .documents-table tbody tr:nth-child(odd) {
+          background: #eef9ef;
+        }
+
+        .documents-table tbody tr:nth-child(even) {
+          background: #ffffff;
+        }
+
+        .documents-actions {
+          display: flex;
+          gap: 8px;
+        }
+
+        .employee-status {
+          margin-top: 12px;
+          font-weight: 500;
+          color: #1f2937;
+        }
+
+        .employee-btn {
+          border: none;
+          border-radius: 6px;
+          padding: 6px 12px;
+          color: #ffffff;
+          font-weight: 600;
+          cursor: pointer;
+        }
+
+        .employee-btn-add {
+          background: #2563eb;
+        }
+
+        .employee-btn-edit {
+          background: #f59e0b;
+        }
+
+        .employee-btn-delete {
+          background: #ef4444;
+        }
+      `}</style>
       <div
         style={{
           marginBottom: '12px',

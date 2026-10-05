@@ -78,7 +78,7 @@ async function initializeDatabase() {
         await connection.query(`
       CREATE TABLE IF NOT EXISTS \`attendance\` (
         id INT AUTO_INCREMENT PRIMARY KEY,
-        employee_id VARCHAR(20) NOT NULL,
+        emp_id VARCHAR(20) NOT NULL,
         attendance_date DATE NOT NULL,
         check_in_time TIME NOT NULL,
         check_out_time TIME NOT NULL,

@@ -7,14 +7,48 @@ function parseAmount(value: string) {
 }
 
 type PayrollRecord = {
-  id: number;
-  employee_id: string;
+  emp_id: number | string;
   payroll_month: string;
-  basic_salary: string;
-  allowances: string;
-  deductions: string;
-  net_salary: string;
+  basic_salary: number | string;
+  allowances: number | string;
+  deductions: number | string;
+  net_salary: number | string;
 };
+
+function monthInputToLabel(value: string) {
+  if (!value || !/^\d{4}-\d{2}$/.test(value)) return value;
+  const [year, month] = value.split('-').map(Number);
+  const date = new Date(year, month - 1, 1);
+  return date.toLocaleString('en-US', { month: 'long', year: 'numeric' });
+}
+
+function monthLabelToInput(value: string) {
+  if (!value) return '';
+  if (/^\d{4}-\d{2}$/.test(value)) return value;
+
+  const parts = String(value).trim().split(/\s+/);
+  if (parts.length !== 2) return '';
+
+  const [monthName, year] = parts;
+  const monthMap: Record<string, string> = {
+    january: '01',
+    february: '02',
+    march: '03',
+    april: '04',
+    may: '05',
+    june: '06',
+    july: '07',
+    august: '08',
+    september: '09',
+    october: '10',
+    november: '11',
+    december: '12'
+  };
+
+  const mm = monthMap[monthName.toLowerCase()];
+  if (!mm || !/^\d{4}$/.test(year)) return '';
+  return `${year}-${mm}`;
+}
 
 export default function PayrollPage() {
   const [employeeId, setEmployeeId] = useState('');
@@ -24,7 +58,7 @@ export default function PayrollPage() {
   const [deductions, setDeductions] = useState('');
   const [isFormOpen, setIsFormOpen] = useState(false);
   const [records, setRecords] = useState([] as PayrollRecord[]);
-  const [editingId, setEditingId] = useState(null as number | null);
+  const [editingEmpId, setEditingEmpId] = useState(null as number | null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null as string | null);
 
@@ -39,7 +73,7 @@ export default function PayrollPage() {
     setBasicSalary('');
     setAllowances('');
     setDeductions('');
-    setEditingId(null);
+    setEditingEmpId(null);
     setIsFormOpen(false);
   }
 
@@ -60,11 +94,11 @@ export default function PayrollPage() {
     event.preventDefault();
 
     const payload = {
-      employee_id: employeeId,
-      payroll_month: payrollMonth,
+      emp_id: Number(employeeId),
+      payroll_month: monthInputToLabel(payrollMonth),
       basic_salary: Number(basicSalary),
-      allowances,
-      deductions,
+      allowances: Number(allowances),
+      deductions: Number(deductions),
       net_salary: Number(netSalary)
     };
 
@@ -73,8 +107,8 @@ export default function PayrollPage() {
         setLoading(true);
         setError(null);
 
-        if (editingId) {
-          const res = await fetch(`${apiRoutes.payroll}/${editingId}`, {
+        if (editingEmpId !== null) {
+          const res = await fetch(`${apiRoutes.payroll}/${editingEmpId}`, {
             method: 'PUT',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(payload)
@@ -84,15 +118,15 @@ export default function PayrollPage() {
 
           setRecords((prev: PayrollRecord[]) =>
             prev.map((record: PayrollRecord) =>
-              record.id === editingId
+              Number(record.emp_id) === editingEmpId
                 ? {
                     ...record,
-                    employee_id: payload.employee_id,
+                    emp_id: payload.emp_id,
                     payroll_month: payload.payroll_month,
-                    basic_salary: String(payload.basic_salary),
-                    allowances: String(payload.allowances),
-                    deductions: String(payload.deductions),
-                    net_salary: String(payload.net_salary)
+                    basic_salary: payload.basic_salary,
+                    allowances: payload.allowances,
+                    deductions: payload.deductions,
+                    net_salary: payload.net_salary
                   }
                 : record
             )
@@ -146,24 +180,24 @@ export default function PayrollPage() {
 
   function handleEdit(record: PayrollRecord) {
     setIsFormOpen(true);
-    setEditingId(record.id);
-    setEmployeeId(record.employee_id);
-    setPayrollMonth(record.payroll_month);
-    setBasicSalary(record.basic_salary);
-    setAllowances(record.allowances);
-    setDeductions(record.deductions);
+    setEditingEmpId(Number(record.emp_id));
+    setEmployeeId(String(record.emp_id));
+    setPayrollMonth(monthLabelToInput(String(record.payroll_month)));
+    setBasicSalary(String(record.basic_salary));
+    setAllowances(String(record.allowances));
+    setDeductions(String(record.deductions));
   }
 
-  async function handleDelete(id: number) {
+  async function handleDelete(empId: number) {
     if (!confirm('Delete this payroll record?')) return;
     const previous = records;
-    setRecords((prev: PayrollRecord[]) => prev.filter((record: PayrollRecord) => record.id !== id));
+    setRecords((prev: PayrollRecord[]) => prev.filter((record: PayrollRecord) => Number(record.emp_id) !== empId));
 
     try {
       setError(null);
-      const res = await fetch(`${apiRoutes.payroll}/${id}`, { method: 'DELETE' });
+      const res = await fetch(`${apiRoutes.payroll}/${empId}`, { method: 'DELETE' });
       if (!res.ok) throw new Error(`Delete failed (${res.status})`);
-      if (editingId === id) {
+      if (editingEmpId === empId) {
         resetForm();
       }
     } catch (err) {
@@ -214,7 +248,7 @@ export default function PayrollPage() {
             cursor: 'pointer'
           }}
         >
-          {isFormOpen && !editingId ? 'Adding Payroll...' : 'Add Payroll'}
+          {isFormOpen && editingEmpId === null ? 'Adding Payroll...' : 'Add Payroll'}
         </button>
       </div>
 
@@ -280,7 +314,7 @@ export default function PayrollPage() {
                 cursor: 'pointer'
               }}
             >
-              {editingId ? 'Update' : 'Save'}
+              {editingEmpId !== null ? 'Update' : 'Save'}
             </button>
 
             <button
@@ -335,8 +369,8 @@ export default function PayrollPage() {
           </thead>
           <tbody>
             {records.map((record: PayrollRecord, index: number) => (
-              <tr key={record.id} style={{ backgroundColor: index % 2 === 0 ? '#eef9ef' : '#fff' }}>
-                <td style={{ border: '1px solid #cfe6dd', padding: '10px' }}>{record.employee_id}</td>
+              <tr key={`${record.emp_id}-${record.payroll_month}`} style={{ backgroundColor: index % 2 === 0 ? '#eef9ef' : '#fff' }}>
+                <td style={{ border: '1px solid #cfe6dd', padding: '10px' }}>{record.emp_id}</td>
                 <td style={{ border: '1px solid #cfe6dd', padding: '10px' }}>{record.payroll_month}</td>
                 <td style={{ border: '1px solid #cfe6dd', padding: '10px' }}>{record.basic_salary}</td>
                 <td style={{ border: '1px solid #cfe6dd', padding: '10px' }}>{record.allowances}</td>
@@ -360,7 +394,7 @@ export default function PayrollPage() {
                   </button>
                   <button
                     type="button"
-                    onClick={() => handleDelete(record.id)}
+                    onClick={() => handleDelete(Number(record.emp_id))}
                     style={{
                       backgroundColor: '#ff4d4f',
                       color: '#fff',
