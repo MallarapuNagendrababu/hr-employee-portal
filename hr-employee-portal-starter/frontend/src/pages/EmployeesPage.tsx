@@ -141,7 +141,14 @@ export default function EmployeesPage() {
           )
         );
       } else {
-        setEmployees((prev: Employee[]) => [...prev, { ...form }]);
+        const response = await fetch(apiRoutes.employees, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(form)
+        });
+        const result = await response.json();
+        if (!response.ok) throw new Error(result.message ?? `Failed to create employee (${response.status})`);
+        setEmployees((prev: Employee[]) => [...prev, result.data as Employee]);
       }
 
       closeForm();

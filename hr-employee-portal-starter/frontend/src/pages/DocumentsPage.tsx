@@ -8,6 +8,7 @@ type DocumentItem = {
   doc_name: string;
   issue_date: string;
   file_name: string;
+  file_url?: string | null;
 };
 
 export default function DocumentsPage() {
@@ -16,6 +17,7 @@ export default function DocumentsPage() {
   const [documentName, setDocumentName] = useState('');
   const [issueDate, setIssueDate] = useState('');
   const [selectedFileName, setSelectedFileName] = useState('');
+  const [selectedFile, setSelectedFile] = useState(null as File | null);
   const [documents, setDocuments] = useState([] as DocumentItem[]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null as string | null);
@@ -23,13 +25,13 @@ export default function DocumentsPage() {
 
   function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    const payload = {
-      employee_id: employeeId,
-      doc_type: documentType,
-      doc_name: documentName,
-      issue_date: issueDate,
-      file_name: selectedFileName || 'unknown'
-    };
+    const payload = new FormData();
+    payload.append('employee_id', employeeId);
+    payload.append('doc_type', documentType);
+    payload.append('doc_name', documentName);
+    payload.append('issue_date', issueDate);
+    if (selectedFile) payload.append('file', selectedFile);
+    else payload.append('file_name', selectedFileName);
 
     async function submit() {
       try {
@@ -39,20 +41,18 @@ export default function DocumentsPage() {
         if (editingId) {
           const res = await fetch(`${apiRoutes.documents}/${editingId}`, {
             method: 'PUT',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(payload)
+            body: payload
           });
 
           if (!res.ok) throw new Error(`Update failed (${res.status})`);
-
+          const result = await res.json();
           setDocuments((prev: DocumentItem[]) =>
-            prev.map((d: DocumentItem) => (d.id === editingId ? { ...d, ...payload, id: editingId } as DocumentItem : d))
+            prev.map((doc: DocumentItem) => (doc.id === editingId ? result.data as DocumentItem : doc))
           );
         } else {
           const res = await fetch(apiRoutes.documents, {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(payload)
+            body: payload
           });
 
           if (!res.ok) throw new Error(`Create failed (${res.status})`);
@@ -70,6 +70,7 @@ export default function DocumentsPage() {
         setDocumentName('');
         setIssueDate('');
         setSelectedFileName('');
+        setSelectedFile(null);
         setEditingId(null);
       } catch (err) {
         setError(err instanceof Error ? err.message : 'Failed to save document');
@@ -83,6 +84,7 @@ export default function DocumentsPage() {
 
   function handleFileChange(event: ChangeEvent<HTMLInputElement>) {
     const file = event.target.files?.[0];
+    setSelectedFile(file ?? null);
     setSelectedFileName(file?.name ?? '');
   }
 
@@ -175,7 +177,7 @@ export default function DocumentsPage() {
 
         <label>
           Upload Document
-          <input type="file" onChange={handleFileChange} required />
+          <input type="file" onChange={handleFileChange} required={!editingId} />
         </label>
 
         <label style={{ gridColumn: '1 / -1' }}>
@@ -232,7 +234,7 @@ export default function DocumentsPage() {
                 <td>{doc.doc_type}</td>
                 <td>{doc.doc_name}</td>
                 <td>{doc.issue_date}</td>
-                <td>{doc.file_name}</td>
+                <td>{doc.file_url ? <a href={doc.file_url}>{doc.file_name}</a> : doc.file_name}</td>
                 <td>
                   <div className="documents-actions">
                     <button
@@ -245,6 +247,7 @@ export default function DocumentsPage() {
                         setDocumentName(doc.doc_name);
                         setIssueDate(doc.issue_date);
                         setSelectedFileName(doc.file_name);
+                        setSelectedFile(null);
                       }}
                     >
                       Edit

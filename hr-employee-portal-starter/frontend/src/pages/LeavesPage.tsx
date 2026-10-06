@@ -1,4 +1,5 @@
-import { useState, type ChangeEvent, type FormEvent } from 'react';
+import { useEffect, useState, type ChangeEvent, type FormEvent } from 'react';
+import { apiRoutes } from '../config/api';
 
 type LeaveStatus = 'Pending' | 'Approved' | 'Rejected';
 
@@ -30,6 +31,22 @@ export default function LeavesPage() {
   const [showForm, setShowForm] = useState(false);
   const [editingId, setEditingId] = useState(null as string | null);
   const [form, setForm] = useState({ ...emptyForm } as Omit<LeaveRequest, 'id'>);
+  const [error, setError] = useState('');
+
+  useEffect(() => {
+    async function loadLeaves() {
+      try {
+        const response = await fetch(apiRoutes.leaves);
+        if (!response.ok) throw new Error(`Failed to load leave requests (${response.status})`);
+        const result: { data: LeaveRequest[] } = await response.json();
+        setLeaves(Array.isArray(result.data) ? result.data : []);
+      } catch (loadError) {
+        setError(loadError instanceof Error ? loadError.message : 'Unable to load leave requests');
+      }
+    }
+
+    void loadLeaves();
+  }, []);
 
   function getNextId(): string {
     const maxId = leaves.reduce((max: number, item: LeaveRequest) => {
@@ -67,8 +84,15 @@ export default function LeavesPage() {
     setForm({ ...emptyForm });
   }
 
-  function handleDelete(id: string) {
-    setLeaves((prev: LeaveRequest[]) => prev.filter((item: LeaveRequest) => item.id !== id));
+  async function handleDelete(id: string) {
+    try {
+      setError('');
+      const response = await fetch(`${apiRoutes.leaves}/${id}`, { method: 'DELETE' });
+      if (!response.ok) throw new Error(`Failed to delete leave request (${response.status})`);
+      setLeaves((prev: LeaveRequest[]) => prev.filter((item: LeaveRequest) => item.id !== id));
+    } catch (deleteError) {
+      setError(deleteError instanceof Error ? deleteError.message : 'Unable to delete leave request');
+    }
   }
 
   function handleInputChange(field: keyof Omit<LeaveRequest, 'id'>, value: string) {
@@ -79,18 +103,29 @@ export default function LeavesPage() {
     setForm((prev: Omit<LeaveRequest, 'id'>) => ({ ...prev, status: event.target.value as LeaveStatus }));
   }
 
-  function handleSubmit(event: FormEvent<HTMLFormElement>) {
+  async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
 
-    if (editingId) {
-      setLeaves((prev: LeaveRequest[]) =>
-        prev.map((item: LeaveRequest) => (item.id === editingId ? { ...form, id: editingId } : item))
-      );
-    } else {
-      setLeaves((prev: LeaveRequest[]) => [...prev, { ...form, id: getNextId() }]);
+    try {
+      setError('');
+      const response = await fetch(editingId ? `${apiRoutes.leaves}/${editingId}` : apiRoutes.leaves, {
+        method: editingId ? 'PUT' : 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(form)
+      });
+      const result = await response.json();
+      if (!response.ok) throw new Error(result.message ?? `Failed to save leave request (${response.status})`);
+      if (editingId) {
+        setLeaves((prev: LeaveRequest[]) =>
+          prev.map((item: LeaveRequest) => (item.id === editingId ? result.data : item))
+        );
+      } else {
+        setLeaves((prev: LeaveRequest[]) => [result.data, ...prev]);
+      }
+      closeForm();
+    } catch (saveError) {
+      setError(saveError instanceof Error ? saveError.message : 'Unable to save leave request');
     }
-
-    closeForm();
   }
 
   return (
@@ -142,6 +177,8 @@ export default function LeavesPage() {
           Add Leave
         </button>
       </div>
+
+      {error && <p role="alert">{error}</p>}
 
       {showForm && (
         <form className="employee-form-card" onSubmit={handleSubmit}>

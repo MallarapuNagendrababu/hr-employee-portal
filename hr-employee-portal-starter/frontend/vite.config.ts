@@ -1,6 +1,6 @@
 import { defineConfig } from 'vite';
 
-const proxyTarget = 'http://localhost:3000';
+const proxyTarget = 'http://localhost:8787';
 
 export default defineConfig({
   server: {

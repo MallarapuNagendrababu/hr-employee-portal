@@ -1,4 +1,5 @@
-import { ChangeEvent, FormEvent, useMemo, useState } from 'react';
+import { ChangeEvent, FormEvent, useEffect, useMemo, useState } from 'react';
+import { apiRoutes } from '../config/api';
 
 function parseAmount(value: string) {
   const amount = Number(value);
@@ -23,6 +24,22 @@ export default function PayrollPage() {
   const [deductions, setDeductions] = useState('');
   const [records, setRecords] = useState([] as PayrollRecord[]);
   const [editingId, setEditingId] = useState(null as string | null);
+  const [error, setError] = useState('');
+
+  useEffect(() => {
+    async function loadRecords() {
+      try {
+        const response = await fetch(apiRoutes.payroll);
+        if (!response.ok) throw new Error(`Failed to load payroll (${response.status})`);
+        const result: { data: PayrollRecord[] } = await response.json();
+        setRecords(Array.isArray(result.data) ? result.data : []);
+      } catch (loadError) {
+        setError(loadError instanceof Error ? loadError.message : 'Unable to load payroll');
+      }
+    }
+
+    void loadRecords();
+  }, []);
 
   const netSalary = useMemo(() => {
     const total = parseAmount(basicSalary) + parseAmount(allowances) - parseAmount(deductions);
@@ -59,28 +76,37 @@ export default function PayrollPage() {
     setTimeout(() => employeeInputEl?.focus(), 0);
   }
 
-  function handleSubmit(event: FormEvent<HTMLFormElement>) {
+  async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
 
     const payload = {
-      id: editingId ?? getNextId(),
       employeeId,
       payrollMonth,
       basicSalary,
       allowances,
-      deductions,
-      netSalary
-    } as PayrollRecord;
+      deductions
+    };
 
-    if (editingId) {
-      setRecords((prev: PayrollRecord[]) =>
-        prev.map((record: PayrollRecord) => (record.id === editingId ? payload : record))
-      );
-    } else {
-      setRecords((prev: PayrollRecord[]) => [...prev, payload]);
+    try {
+      setError('');
+      const response = await fetch(editingId ? `${apiRoutes.payroll}/${editingId}` : apiRoutes.payroll, {
+        method: editingId ? 'PUT' : 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      });
+      const result = await response.json();
+      if (!response.ok) throw new Error(result.message ?? `Failed to save payroll (${response.status})`);
+      if (editingId) {
+        setRecords((prev: PayrollRecord[]) =>
+          prev.map((record: PayrollRecord) => (record.id === editingId ? result.data : record))
+        );
+      } else {
+        setRecords((prev: PayrollRecord[]) => [result.data, ...prev]);
+      }
+      resetForm();
+    } catch (saveError) {
+      setError(saveError instanceof Error ? saveError.message : 'Unable to save payroll');
     }
-
-    resetForm();
   }
 
   function handleEmployeeIdChange(event: ChangeEvent<HTMLInputElement>) {
@@ -112,16 +138,21 @@ export default function PayrollPage() {
     setDeductions(record.deductions);
   }
 
-  function handleDelete(id: string) {
-    setRecords((prev: PayrollRecord[]) => prev.filter((record: PayrollRecord) => record.id !== id));
-
-    if (editingId === id) {
-      resetForm();
+  async function handleDelete(id: string) {
+    try {
+      setError('');
+      const response = await fetch(`${apiRoutes.payroll}/${id}`, { method: 'DELETE' });
+      if (!response.ok) throw new Error(`Failed to delete payroll (${response.status})`);
+      setRecords((prev: PayrollRecord[]) => prev.filter((record: PayrollRecord) => record.id !== id));
+      if (editingId === id) resetForm();
+    } catch (deleteError) {
+      setError(deleteError instanceof Error ? deleteError.message : 'Unable to delete payroll');
     }
   }
 
   return (
     <section>
+      {error && <p role="alert">{error}</p>}
       <div
         style={{
           marginBottom: '12px',

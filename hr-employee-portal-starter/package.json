@@ -3,7 +3,14 @@
   "scripts": {
     "dev": "npm --prefix frontend run dev",
     "build": "npm --prefix frontend run build",
-    "preview": "npm --prefix frontend run preview"
+    "preview": "npm --prefix frontend run preview",
+    "deploy": "npm --prefix frontend run deploy",
+    "dev:worker": "npm --prefix frontend run dev:worker",
+    "db:create": "npm --prefix frontend run db:create",
+    "db:migrate:local": "npm --prefix frontend run db:migrate:local",
+    "db:migrate:remote": "npm --prefix frontend run db:migrate:remote",
+    "r2:create": "npm --prefix frontend run r2:create",
+    "check:api": "npm --prefix backend run check"
   },
   "devDependencies": {
     "@types/react": "^19.2.17",

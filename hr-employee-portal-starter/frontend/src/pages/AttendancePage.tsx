@@ -1,4 +1,5 @@
-import { ChangeEvent, FormEvent, useMemo, useState } from 'react';
+import { ChangeEvent, FormEvent, useEffect, useMemo, useState } from 'react';
+import { apiRoutes } from '../config/api';
 
 function calculateWorkingHours(checkIn: string, checkOut: string) {
   if (!checkIn || !checkOut) {
@@ -37,6 +38,22 @@ export default function AttendancePage() {
   const [checkOutTime, setCheckOutTime] = useState('');
   const [records, setRecords] = useState([] as AttendanceRecord[]);
   const [editingId, setEditingId] = useState(null as string | null);
+  const [error, setError] = useState('');
+
+  useEffect(() => {
+    async function loadRecords() {
+      try {
+        const response = await fetch(apiRoutes.attendance);
+        if (!response.ok) throw new Error(`Failed to load attendance (${response.status})`);
+        const result: { data: AttendanceRecord[] } = await response.json();
+        setRecords(Array.isArray(result.data) ? result.data : []);
+      } catch (loadError) {
+        setError(loadError instanceof Error ? loadError.message : 'Unable to load attendance');
+      }
+    }
+
+    void loadRecords();
+  }, []);
 
   const workingHours = useMemo(
     () => calculateWorkingHours(checkInTime, checkOutTime),
@@ -60,27 +77,36 @@ export default function AttendancePage() {
     setEditingId(null);
   }
 
-  function handleSubmit(event: FormEvent<HTMLFormElement>) {
+  async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
 
     const payload = {
-      id: editingId ?? getNextId(),
       employeeId,
       attendanceDate,
       checkInTime,
-      checkOutTime,
-      workingHours
-    } as AttendanceRecord;
+      checkOutTime
+    };
 
-    if (editingId) {
-      setRecords((prev: AttendanceRecord[]) =>
-        prev.map((record: AttendanceRecord) => (record.id === editingId ? payload : record))
-      );
-    } else {
-      setRecords((prev: AttendanceRecord[]) => [...prev, payload]);
+    try {
+      setError('');
+      const response = await fetch(editingId ? `${apiRoutes.attendance}/${editingId}` : apiRoutes.attendance, {
+        method: editingId ? 'PUT' : 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      });
+      const result = await response.json();
+      if (!response.ok) throw new Error(result.message ?? `Failed to save attendance (${response.status})`);
+      if (editingId) {
+        setRecords((prev: AttendanceRecord[]) =>
+          prev.map((record: AttendanceRecord) => (record.id === editingId ? result.data : record))
+        );
+      } else {
+        setRecords((prev: AttendanceRecord[]) => [result.data, ...prev]);
+      }
+      resetForm();
+    } catch (saveError) {
+      setError(saveError instanceof Error ? saveError.message : 'Unable to save attendance');
     }
-
-    resetForm();
   }
 
   function handleEmployeeIdChange(event: ChangeEvent<HTMLInputElement>) {
@@ -107,11 +133,15 @@ export default function AttendancePage() {
     setCheckOutTime(record.checkOutTime);
   }
 
-  function handleDelete(id: string) {
-    setRecords((prev: AttendanceRecord[]) => prev.filter((record: AttendanceRecord) => record.id !== id));
-
-    if (editingId === id) {
-      resetForm();
+  async function handleDelete(id: string) {
+    try {
+      setError('');
+      const response = await fetch(`${apiRoutes.attendance}/${id}`, { method: 'DELETE' });
+      if (!response.ok) throw new Error(`Failed to delete attendance (${response.status})`);
+      setRecords((prev: AttendanceRecord[]) => prev.filter((record: AttendanceRecord) => record.id !== id));
+      if (editingId === id) resetForm();
+    } catch (deleteError) {
+      setError(deleteError instanceof Error ? deleteError.message : 'Unable to delete attendance');
     }
   }
 
@@ -124,6 +154,7 @@ export default function AttendancePage() {
         padding: '20px'
       }}
     >
+      {error && <p role="alert">{error}</p>}
       <div
         style={{
           marginBottom: '12px',

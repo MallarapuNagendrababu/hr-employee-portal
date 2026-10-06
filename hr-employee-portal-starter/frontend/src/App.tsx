@@ -8,7 +8,6 @@ import LeavesPage from './pages/LeavesPage';
 import AttendancePage from './pages/AttendancePage';
 import PayrollPage from './pages/PayrollPage';
 import DocumentsPage from './pages/DocumentsPage';
-import LoginPage from './pages/LoginPage';
 import './emp.css';
 
 type Route = {
@@ -16,8 +15,6 @@ type Route = {
   label: string;
   icon: string;
 };
-
-const loginRoute: Route = { path: '/login', label: 'Login', icon: '🔐' };
 
 const routes: Route[] = [
   { path: '/dashboard', label: 'Dashboard', icon: '🏠' },
@@ -29,9 +26,10 @@ const routes: Route[] = [
 ];
 
 function getRoute(pathname: string) {
-  const normalizedPath = pathname === '/hr' ? '/dashboard' : pathname;
-  if (normalizedPath === '/' || normalizedPath === '/login') return loginRoute;
-  return routes.find((route) => route.path === normalizedPath) ?? loginRoute;
+  const normalizedPath = pathname === '/hr' || pathname === '/' || pathname === '/login'
+    ? '/dashboard'
+    : pathname;
+  return routes.find((route) => route.path === normalizedPath) ?? routes[0];
 }
 
 export default function App() {
@@ -54,7 +52,7 @@ export default function App() {
 
   const activeRoute = useMemo(() => getRoute(pathname), [pathname]);
 
-  let page = <LoginPage onLoginSuccess={() => handleNavigate('/dashboard')} />;
+  let page = <DashboardPage />;
 
   if (activeRoute.path === '/dashboard') page = <DashboardPage />;
   if (activeRoute.path === '/employees') page = <EmployeesPage />;
@@ -62,16 +60,6 @@ export default function App() {
   if (activeRoute.path === '/attendance') page = <AttendancePage />;
   if (activeRoute.path === '/payroll') page = <PayrollPage />;
   if (activeRoute.path === '/documents') page = <DocumentsPage />;
-  if (activeRoute.path === '/login') page = <LoginPage onLoginSuccess={() => handleNavigate('/dashboard')} />;
-
-  if (activeRoute.path === '/login') {
-    return (
-      <div className="auth-screen">
-        <main className="auth-screen-content">{page}</main>
-      </div>
-    );
-  }
-
   return (
     <div className="portal-shell">
       <Header title="Employee Portal" />

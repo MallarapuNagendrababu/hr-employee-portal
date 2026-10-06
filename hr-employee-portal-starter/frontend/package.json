@@ -5,7 +5,13 @@
   "scripts": {
     "dev": "vite",
     "build": "vite build",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "deploy": "npm run build && wrangler deploy --config ../wrangler.jsonc",
+    "dev:worker": "wrangler dev --config ../wrangler.jsonc --var ACCESS_TEAM_DOMAIN:local",
+    "db:create": "wrangler d1 create hr-employee-portal --config ../wrangler.jsonc",
+    "db:migrate:local": "wrangler d1 migrations apply hr-employee-portal --local --config ../wrangler.jsonc",
+    "db:migrate:remote": "wrangler d1 migrations apply hr-employee-portal --remote --config ../wrangler.jsonc",
+    "r2:create": "wrangler r2 bucket create hr-employee-portal-documents --config ../wrangler.jsonc"
   },
   "dependencies": {
     "react": "^19.2.7",
@@ -15,6 +21,7 @@
     "@types/react": "^19.2.17",
     "@types/react-dom": "^19.2.3",
     "typescript": "^6.0.3",
-    "vite": "^8.0.16"
+    "vite": "^8.0.16",
+    "wrangler": "^4.0.0"
   }
 }
