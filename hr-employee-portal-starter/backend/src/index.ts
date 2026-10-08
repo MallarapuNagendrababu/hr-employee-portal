@@ -2,7 +2,7 @@ import { createRemoteJWKSet, jwtVerify } from 'jose';
 
 interface Env {
   DB: D1Database;
-  DOCUMENTS: R2Bucket;
+  DOCUMENTS?: R2Bucket;
   ASSETS: Fetcher;
   ACCESS_TEAM_DOMAIN?: string;
   ACCESS_AUD?: string;
@@ -131,8 +131,9 @@ async function authorize(request: Request, env: Env): Promise<Response | null> {
   if (teamDomain === 'local' && ['localhost', '127.0.0.1', '::1'].includes(url.hostname)) {
     return null;
   }
+  // Access is optional until the account has a team domain and audience configured.
   if (!teamDomain || !audience) {
-    return json({ message: 'Cloudflare Access is not configured for this API' }, 503);
+    return null;
   }
 
   const host = teamDomain.replace(/^https?:\/\//, '').replace(/\/+$/, '');
@@ -552,6 +553,13 @@ async function readDocument(request: Request): Promise<DocumentInput> {
   };
 }
 
+function documentsBucket(env: Env): R2Bucket {
+  if (!env.DOCUMENTS) {
+    return fail(503, 'Document file storage is unavailable until R2 is enabled on this Cloudflare account');
+  }
+  return env.DOCUMENTS;
+}
+
 function mapDocument(row: DocumentRow) {
   return {
     id: row.id,
@@ -576,7 +584,7 @@ async function documentRoutes(request: Request, env: Env, segments: string[]): P
     const document = await readDocument(request);
     const objectKey = document.file ? `${crypto.randomUUID()}/${document.fileName}` : null;
     if (document.file && objectKey) {
-      await env.DOCUMENTS.put(objectKey, document.file, {
+      await documentsBucket(env).put(objectKey, document.file, {
         httpMetadata: { contentType: document.file.type || 'application/octet-stream' }
       });
     }
@@ -588,7 +596,7 @@ async function documentRoutes(request: Request, env: Env, segments: string[]): P
         document.fileName, objectKey).first<DocumentRow>();
       return json({ message: 'Document created successfully', data: result && mapDocument(result) }, 201);
     } catch (error) {
-      if (objectKey) await env.DOCUMENTS.delete(objectKey);
+      if (objectKey) await documentsBucket(env).delete(objectKey);
       if (isDatabaseConflict(error)) fail(400, 'Employee does not exist');
       throw error;
     }
@@ -599,7 +607,7 @@ async function documentRoutes(request: Request, env: Env, segments: string[]): P
     const document = await env.DB.prepare('SELECT * FROM documents WHERE id = ?').bind(id).first<DocumentRow>();
     if (!document) fail(404, 'Document not found');
     if (!document.object_key) fail(404, 'No uploaded file is stored for this document');
-    const object = await env.DOCUMENTS.get(document.object_key);
+    const object = await documentsBucket(env).get(document.object_key);
     if (!object) fail(404, 'Document file not found');
     return new Response(object.body, {
       headers: {
@@ -618,14 +626,14 @@ async function documentRoutes(request: Request, env: Env, segments: string[]): P
     if (!current) fail(404, 'Document not found');
     if (method === 'DELETE') {
       await env.DB.prepare('DELETE FROM documents WHERE id = ?').bind(id).run();
-      if (current.object_key) await env.DOCUMENTS.delete(current.object_key);
+      if (current.object_key) await documentsBucket(env).delete(current.object_key);
       return json({ message: 'Document deleted successfully' });
     }
 
     const document = await readDocument(request);
     const objectKey = document.file ? `${crypto.randomUUID()}/${document.fileName}` : current.object_key;
     if (document.file && objectKey) {
-      await env.DOCUMENTS.put(objectKey, document.file, {
+      await documentsBucket(env).put(objectKey, document.file, {
         httpMetadata: { contentType: document.file.type || 'application/octet-stream' }
       });
     }
@@ -638,13 +646,13 @@ async function documentRoutes(request: Request, env: Env, segments: string[]): P
       `).bind(document.employeeId, document.docType, document.docName, document.issueDate,
         document.file ? document.fileName : current.file_name, objectKey, id).first<DocumentRow>();
     } catch (error) {
-      if (document.file && objectKey) await env.DOCUMENTS.delete(objectKey);
+      if (document.file && objectKey) await documentsBucket(env).delete(objectKey);
       if (isDatabaseConflict(error)) fail(400, 'Employee does not exist');
       throw error;
     }
     if (document.file && current.object_key) {
       try {
-        await env.DOCUMENTS.delete(current.object_key);
+        await documentsBucket(env).delete(current.object_key);
       } catch (error) {
         console.error('Failed to delete replaced R2 object', error);
       }

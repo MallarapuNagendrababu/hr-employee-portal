@@ -41,7 +41,7 @@ Run `npm run dev:worker` in one terminal and `npm run dev` in another. Vite prox
 ### Cloudflare resources and deploy
 
 1. Authenticate locally with `npx wrangler login` from `frontend/`.
-2. The D1 database is already created for the configured Cloudflare account. For a different account, create D1 and update `database_id` in `wrangler.jsonc`. Enable R2 in the Cloudflare dashboard, then create the document bucket:
+2. The D1 database is already created for the configured Cloudflare account. For a different account, create D1 and update `database_id` in `wrangler.jsonc`. R2 must be enabled in the Cloudflare dashboard before document files can be stored. After enabling it, uncomment the `r2_buckets` block in `wrangler.jsonc`, then create the document bucket:
 
    ```bash
    npm run r2:create
