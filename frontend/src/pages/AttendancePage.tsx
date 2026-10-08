@@ -53,6 +53,7 @@ export default function AttendancePage() {
   const [showForm, setShowForm] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null as string | null);
+  const [employeeOptions, setEmployeeOptions] = useState([] as { emp_id: string; label: string }[]);
 
   const workingHours = useMemo(
     () => calculateWorkingHours(checkInTime, checkOutTime),
@@ -109,6 +110,21 @@ export default function AttendancePage() {
   useEffect(() => {
     const controller = new AbortController();
     loadAttendance(controller.signal);
+    fetch(apiRoutes.employees, { signal: controller.signal })
+      .then((response) => (response.ok ? response.json() : null))
+      .then((result: { data?: { emp_id: string; first_name?: string; last_name?: string }[] } | null) => {
+        const options = Array.isArray(result?.data)
+          ? result.data
+              .map((item) => ({
+                emp_id: String(item.emp_id).trim(),
+                label: `${item.emp_id} — ${item.first_name ?? ''} ${item.last_name ?? ''}`.trim()
+              }))
+              .filter((item) => item.emp_id.length > 0)
+          : [];
+        setEmployeeOptions(options);
+        setEmployeeId((current) => current || options[0]?.emp_id || '');
+      })
+      .catch(() => undefined);
     return () => controller.abort();
   }, []);
 
@@ -131,6 +147,7 @@ export default function AttendancePage() {
 
   function openAddForm() {
     resetForm();
+    setEmployeeId(employeeOptions[0]?.emp_id ?? '');
     setShowForm(true);
   }
 
@@ -185,7 +202,8 @@ export default function AttendancePage() {
         });
 
         if (!response.ok) {
-          throw new Error(`Failed to create attendance (${response.status})`);
+          const result = (await response.json().catch(() => null)) as { message?: string } | null;
+          throw new Error(result?.message ?? `Failed to create attendance (${response.status})`);
         }
 
         const result = (await response.json()) as { data?: AttendanceApiItem };
@@ -302,14 +320,19 @@ export default function AttendancePage() {
         >
           <label style={{ color: '#1e2a3b', fontWeight: 600 }}>
             Employee ID
-            <input
-              type="text"
+            <select
               value={employeeId}
               onChange={handleEmployeeIdChange}
-              placeholder="Enter employee ID"
               style={{ border: '1px solid #b7cdfa', borderRadius: '8px', padding: '10px', marginTop: '6px' }}
               required
-            />
+            >
+              <option value="">Select an employee</option>
+              {employeeOptions.map((employee) => (
+                <option key={employee.emp_id} value={employee.emp_id}>
+                  {employee.label}
+                </option>
+              ))}
+            </select>
           </label>
 
           <label style={{ color: '#1e2a3b', fontWeight: 600 }}>

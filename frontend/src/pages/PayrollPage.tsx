@@ -15,6 +15,12 @@ type PayrollRecord = {
   net_salary: number | string;
 };
 
+type EmployeeOption = {
+  emp_id: string;
+  first_name: string;
+  last_name: string;
+};
+
 function monthInputToLabel(value: string) {
   if (!value || !/^\d{4}-\d{2}$/.test(value)) return value;
   const [year, month] = value.split('-').map(Number);
@@ -61,6 +67,7 @@ export default function PayrollPage() {
   const [editingEmpId, setEditingEmpId] = useState(null as number | null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null as string | null);
+  const [employees, setEmployees] = useState([] as EmployeeOption[]);
 
   const netSalary = useMemo(() => {
     const total = parseAmount(basicSalary) + parseAmount(allowances) - parseAmount(deductions);
@@ -77,16 +84,15 @@ export default function PayrollPage() {
     setIsFormOpen(false);
   }
 
-  const [employeeInputEl, setEmployeeInputEl] = useState(null as HTMLInputElement | null);
+  const [employeeInputEl, setEmployeeInputEl] = useState(null as HTMLSelectElement | null);
 
   function openAdd() {
     resetForm();
-    // default payroll month to current month
     const now = new Date();
     const month = now.toISOString().slice(0, 7);
     setPayrollMonth(month);
+    setEmployeeId(employees[0]?.emp_id ?? '');
     setIsFormOpen(true);
-    // focus the first input
     setTimeout(() => employeeInputEl?.focus(), 0);
   }
 
@@ -94,7 +100,7 @@ export default function PayrollPage() {
     event.preventDefault();
 
     const payload = {
-      emp_id: Number(employeeId),
+      emp_id: employeeId.trim(),
       payroll_month: monthInputToLabel(payrollMonth),
       basic_salary: Number(basicSalary),
       allowances: Number(allowances),
@@ -138,7 +144,10 @@ export default function PayrollPage() {
             body: JSON.stringify(payload)
           });
 
-          if (!res.ok) throw new Error(`Create failed (${res.status})`);
+          if (!res.ok) {
+            const failure = (await res.json().catch(() => null)) as { message?: string } | null;
+            throw new Error(failure?.message ?? `Create failed (${res.status})`);
+          }
 
           const data = await res.json();
           const created = data.data as PayrollRecord | undefined;
@@ -223,6 +232,21 @@ export default function PayrollPage() {
 
   useEffect(() => {
     loadPayroll();
+    fetch(apiRoutes.employees)
+      .then((response) => (response.ok ? response.json() : null))
+      .then((result: { data?: EmployeeOption[] } | null) => {
+        const options = Array.isArray(result?.data)
+          ? result.data
+              .map((item) => ({
+                emp_id: String(item.emp_id).trim(),
+                first_name: String(item.first_name ?? ''),
+                last_name: String(item.last_name ?? '')
+              }))
+              .filter((item) => item.emp_id.length > 0)
+          : [];
+        setEmployees(options);
+      })
+      .catch(() => undefined);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -265,14 +289,19 @@ export default function PayrollPage() {
         >
           <label>
             Employee ID
-            <input
-              type="text"
+            <select
               ref={setEmployeeInputEl}
               value={employeeId}
-              onChange={handleEmployeeIdChange}
-              placeholder="Enter employee ID"
+              onChange={(event) => setEmployeeId(event.target.value)}
               required
-            />
+            >
+              <option value="">Select an employee</option>
+              {employees.map((employee) => (
+                <option key={employee.emp_id} value={employee.emp_id}>
+                  {employee.emp_id} — {employee.first_name} {employee.last_name}
+                </option>
+              ))}
+            </select>
           </label>
 
           <label>

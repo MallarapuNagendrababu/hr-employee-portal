@@ -123,6 +123,36 @@ function isDatabaseConflict(error: unknown): boolean {
   return /UNIQUE constraint failed|FOREIGN KEY constraint failed/i.test(String(error));
 }
 
+async function resolveEmployeeId(db: D1Database, raw: string): Promise<string> {
+  const text = raw.trim();
+  if (!text || text === 'NaN') fail(400, 'Employee ID is required');
+
+  const known = await db.prepare(
+    'SELECT emp_id, first_name, last_name, email FROM employee_management ORDER BY emp_id'
+  ).all<{ emp_id: string; first_name: string; last_name: string; email: string }>();
+  const employees = known.results;
+  if (employees.length === 0) {
+    return fail(400, 'Add the employee on the Employees page before saving this record.');
+  }
+  if (employees.length === 1) return employees[0].emp_id;
+
+  const folded = text.toLowerCase();
+  const tokens = text.split(/[\s(—–\-),]+/).map((token) => token.trim()).filter(Boolean);
+  const match = employees.find((row) => {
+    const fullName = `${row.first_name} ${row.last_name}`.toLowerCase();
+    return row.emp_id === text
+      || tokens.includes(row.emp_id)
+      || row.first_name.toLowerCase() === folded
+      || row.last_name.toLowerCase() === folded
+      || fullName === folded
+      || row.email.toLowerCase() === folded;
+  });
+  if (match) return match.emp_id;
+
+  const list = employees.map((row) => `${row.emp_id} (${row.first_name} ${row.last_name})`).join(', ');
+  return fail(400, `Employee does not exist. Choose ${list}.`);
+}
+
 async function authorize(request: Request, env: Env): Promise<Response | null> {
   const url = new URL(request.url);
   const teamDomain = env.ACCESS_TEAM_DOMAIN?.trim();
@@ -244,27 +274,37 @@ function mapLeave(row: LeaveRow) {
   return {
     id: String(row.id),
     employeeId: row.employee_id,
+    employee_id: row.employee_id,
     casualLeave: String(row.casual_leave),
+    casual_leave: row.casual_leave,
     sickLeave: String(row.sick_leave),
+    sick_leave: row.sick_leave,
     earnedLeave: String(row.earned_leave),
+    earned_leave: row.earned_leave,
     reason: row.reason,
     startDate: row.start_date,
+    start_date: row.start_date,
     endDate: row.end_date,
+    end_date: row.end_date,
     status: row.status
   };
 }
 
 function readLeave(body: Record<string, unknown>) {
-  const startDate = dateField(body.startDate, 'startDate');
-  const endDate = dateField(body.endDate, 'endDate');
+  const startDate = dateField(body.startDate ?? body.start_date, 'startDate');
+  const endDate = dateField(body.endDate ?? body.end_date, 'endDate');
   if (endDate < startDate) fail(400, 'endDate must be on or after startDate');
   const status = body.status;
   if (!['Pending', 'Approved', 'Rejected'].includes(String(status))) fail(400, 'status is invalid');
   return {
-    employeeId: textField(body, 'employeeId', 20),
-    casualLeave: integerField(body.casualLeave, 'casualLeave'),
-    sickLeave: integerField(body.sickLeave, 'sickLeave'),
-    earnedLeave: integerField(body.earnedLeave, 'earnedLeave'),
+    employeeId: textField(
+      { employeeId: String(body.employeeId ?? body.employee_id ?? body.emp_id ?? '').trim() },
+      'employeeId',
+      80
+    ),
+    casualLeave: integerField(body.casualLeave ?? body.casual_leave, 'casualLeave'),
+    sickLeave: integerField(body.sickLeave ?? body.sick_leave, 'sickLeave'),
+    earnedLeave: integerField(body.earnedLeave ?? body.earned_leave, 'earnedLeave'),
     reason: textField(body, 'reason', 500),
     startDate,
     endDate,
@@ -281,6 +321,7 @@ async function leaveRoutes(request: Request, env: Env, segments: string[]): Prom
 
   if (segments.length === 1 && method === 'POST') {
     const leave = readLeave(await readJson(request));
+    leave.employeeId = await resolveEmployeeId(env.DB, leave.employeeId);
     try {
       const result = await env.DB.prepare(`
         INSERT INTO leave_requests
@@ -307,6 +348,7 @@ async function leaveRoutes(request: Request, env: Env, segments: string[]): Prom
     }
 
     const leave = readLeave(await readJson(request));
+    leave.employeeId = await resolveEmployeeId(env.DB, leave.employeeId);
     try {
       const result = await env.DB.prepare(`
         UPDATE leave_requests
@@ -335,33 +377,64 @@ type AttendanceRow = {
 };
 
 function mapAttendance(row: AttendanceRow) {
+  const workingHours = `${Math.floor(row.working_minutes / 60)}h ${row.working_minutes % 60}m`;
   return {
     id: String(row.id),
     employeeId: row.employee_id,
+    emp_id: row.employee_id,
     attendanceDate: row.attendance_date,
+    attendance_date: row.attendance_date,
     checkInTime: row.check_in_time,
+    check_in_time: row.check_in_time,
     checkOutTime: row.check_out_time,
-    workingHours: `${Math.floor(row.working_minutes / 60)}h ${row.working_minutes % 60}m`
+    check_out_time: row.check_out_time,
+    workingHours,
+    working_hours: workingHours
   };
 }
 
+function clockTime(value: unknown, key: string): string {
+  if (typeof value !== 'string') fail(400, `${key} must use HH:mm`);
+  const match = value.trim().match(/^([01]\d|2[0-3]):([0-5]\d)(?::[0-5]\d)?$/);
+  if (!match) fail(400, `${key} must use HH:mm`);
+  return `${match[1]}:${match[2]}`;
+}
+
 function readAttendance(body: Record<string, unknown>) {
-  const checkInTime = body.checkInTime;
-  const checkOutTime = body.checkOutTime;
-  const timePattern = /^(?:[01]\d|2[0-3]):[0-5]\d$/;
-  if (typeof checkInTime !== 'string' || !timePattern.test(checkInTime)) fail(400, 'checkInTime must use HH:mm');
-  if (typeof checkOutTime !== 'string' || !timePattern.test(checkOutTime)) fail(400, 'checkOutTime must use HH:mm');
+  const checkInTime = clockTime(body.checkInTime ?? body.check_in_time, 'checkInTime');
+  const checkOutTime = clockTime(body.checkOutTime ?? body.check_out_time, 'checkOutTime');
   const [inHour, inMinute] = checkInTime.split(':').map(Number);
   const [outHour, outMinute] = checkOutTime.split(':').map(Number);
   const workingMinutes = outHour * 60 + outMinute - inHour * 60 - inMinute;
   if (workingMinutes <= 0) fail(400, 'checkOutTime must be after checkInTime');
   return {
-    employeeId: textField(body, 'employeeId', 20),
-    attendanceDate: dateField(body.attendanceDate, 'attendanceDate'),
+    employeeId: textField(
+      { employeeId: String(body.employeeId ?? body.employee_id ?? body.emp_id ?? '').trim() },
+      'employeeId',
+      80
+    ),
+    attendanceDate: dateField(body.attendanceDate ?? body.attendance_date, 'attendanceDate'),
     checkInTime,
     checkOutTime,
     workingMinutes
   };
+}
+
+async function findAttendance(env: Env, segment: string): Promise<AttendanceRow | null> {
+  const decoded = decodeURIComponent(segment);
+  const numeric = Number(decoded);
+  if (Number.isSafeInteger(numeric) && numeric >= 1 && String(numeric) === decoded) {
+    return env.DB.prepare('SELECT * FROM attendance_records WHERE id = ?').bind(numeric).first<AttendanceRow>();
+  }
+
+  const separator = decoded.indexOf('__');
+  if (separator < 1) fail(400, 'Attendance ID is invalid');
+  const employeeId = decoded.slice(0, separator);
+  const attendanceDate = decoded.slice(separator + 2);
+  if (!employeeId || !/^\d{4}-\d{2}-\d{2}$/.test(attendanceDate)) fail(400, 'Attendance ID is invalid');
+  return env.DB.prepare(
+    'SELECT * FROM attendance_records WHERE employee_id = ? AND attendance_date = ?'
+  ).bind(employeeId, attendanceDate).first<AttendanceRow>();
 }
 
 async function attendanceRoutes(request: Request, env: Env, segments: string[]): Promise<Response> {
@@ -374,35 +447,37 @@ async function attendanceRoutes(request: Request, env: Env, segments: string[]):
 
   if (segments.length === 1 && method === 'POST') {
     const attendance = readAttendance(await readJson(request));
+    attendance.employeeId = await resolveEmployeeId(env.DB, attendance.employeeId);
     try {
       const result = await env.DB.prepare(`
         INSERT INTO attendance_records
           (employee_id, attendance_date, check_in_time, check_out_time, working_minutes)
-        VALUES (?, ?, ?, ?, ?) RETURNING *
+        VALUES (?, ?, ?, ?, ?)
+        ON CONFLICT(employee_id, attendance_date) DO UPDATE SET
+          check_in_time = excluded.check_in_time,
+          check_out_time = excluded.check_out_time,
+          working_minutes = excluded.working_minutes
+        RETURNING *
       `).bind(attendance.employeeId, attendance.attendanceDate, attendance.checkInTime,
         attendance.checkOutTime, attendance.workingMinutes).first<AttendanceRow>();
-      return json({ message: 'Attendance created successfully', data: result && mapAttendance(result) }, 201);
+      return json({ message: 'Attendance saved successfully', data: result && mapAttendance(result) }, 201);
     } catch (error) {
-      if (isDatabaseConflict(error)) {
-        fail(409, /UNIQUE constraint failed/i.test(String(error))
-          ? 'Attendance already exists for this employee and date'
-          : 'Employee does not exist');
-      }
+      if (isDatabaseConflict(error)) fail(400, 'Employee does not exist. Use an employee ID from the Employees page.');
       throw error;
     }
   }
 
   if (segments.length === 2 && ['PUT', 'DELETE'].includes(method)) {
-    const id = Number(segments[1]);
-    if (!Number.isSafeInteger(id) || id < 1) fail(400, 'Attendance ID is invalid');
-    const current = await env.DB.prepare('SELECT id FROM attendance_records WHERE id = ?').bind(id).first();
+    const current = await findAttendance(env, segments[1]);
     if (!current) fail(404, 'Attendance record not found');
+    const id = current.id;
     if (method === 'DELETE') {
       await env.DB.prepare('DELETE FROM attendance_records WHERE id = ?').bind(id).run();
       return json({ message: 'Attendance deleted successfully' });
     }
 
     const attendance = readAttendance(await readJson(request));
+    attendance.employeeId = await resolveEmployeeId(env.DB, attendance.employeeId);
     try {
       const result = await env.DB.prepare(`
         UPDATE attendance_records
@@ -430,37 +505,78 @@ type PayrollRow = {
   net_salary_cents: number;
 };
 
+const payrollMonthNames = [
+  'January', 'February', 'March', 'April', 'May', 'June',
+  'July', 'August', 'September', 'October', 'November', 'December'
+];
+
+function payrollMonthLabel(yyyyMm: string): string {
+  const [year, month] = yyyyMm.split('-').map(Number);
+  return `${payrollMonthNames[month - 1]} ${year}`;
+}
+
+function normalizePayrollMonth(value: unknown): string {
+  if (typeof value !== 'string') fail(400, 'payrollMonth must use YYYY-MM or a month name and year');
+  const trimmed = value.trim();
+  if (/^\d{4}-(0[1-9]|1[0-2])$/.test(trimmed)) return trimmed;
+  const parts = trimmed.split(/\s+/);
+  const monthIndex = parts.length === 2 ? payrollMonthNames.findIndex((name) => name.toLowerCase() === parts[0].toLowerCase()) : -1;
+  if (monthIndex >= 0 && /^\d{4}$/.test(parts[1])) {
+    return `${parts[1]}-${String(monthIndex + 1).padStart(2, '0')}`;
+  }
+  return fail(400, 'payrollMonth must use YYYY-MM or a month name and year');
+}
+
 function mapPayroll(row: PayrollRow) {
+  const basicSalary = centsToMoney(row.basic_salary_cents);
+  const allowances = centsToMoney(row.allowances_cents);
+  const deductions = centsToMoney(row.deductions_cents);
+  const netSalary = centsToMoney(row.net_salary_cents);
+  const payrollMonth = payrollMonthLabel(row.payroll_month);
   return {
     id: String(row.id),
     employeeId: row.employee_id,
+    emp_id: row.employee_id,
     payrollMonth: row.payroll_month,
-    basicSalary: centsToMoney(row.basic_salary_cents),
-    allowances: centsToMoney(row.allowances_cents),
-    deductions: centsToMoney(row.deductions_cents),
-    netSalary: centsToMoney(row.net_salary_cents)
+    payroll_month: payrollMonth,
+    basicSalary,
+    basic_salary: basicSalary,
+    allowances,
+    deductions,
+    netSalary,
+    net_salary: netSalary
   };
 }
 
 function readPayroll(body: Record<string, unknown>) {
   const field = (camel: string, snake: string) => body[camel] ?? body[snake];
-  const payrollMonth = field('payrollMonth', 'payroll_month');
-  if (typeof payrollMonth !== 'string' || !/^\d{4}-(0[1-9]|1[0-2])$/.test(payrollMonth)) {
-    fail(400, 'payrollMonth must use YYYY-MM format');
-  }
+  const payrollMonth = normalizePayrollMonth(field('payrollMonth', 'payroll_month'));
   const basicSalary = moneyToCents(field('basicSalary', 'basic_salary'), 'basicSalary');
   const allowances = moneyToCents(body.allowances, 'allowances');
   const deductions = moneyToCents(body.deductions, 'deductions');
   const netSalary = basicSalary + allowances - deductions;
   if (netSalary < 0) fail(400, 'deductions cannot exceed basic salary plus allowances');
+  const rawEmployeeId = body.employeeId ?? body.employee_id ?? body.emp_id;
   return {
-    employeeId: textField(body, 'employeeId', 20),
+    employeeId: textField({ employeeId: rawEmployeeId == null ? '' : String(rawEmployeeId).trim() }, 'employeeId', 80),
     payrollMonth,
     basicSalary,
     allowances,
     deductions,
     netSalary
   };
+}
+
+async function findPayroll(env: Env, segment: string): Promise<PayrollRow | null> {
+  const decoded = decodeURIComponent(segment);
+  const byEmployee = await env.DB.prepare(
+    'SELECT * FROM payroll WHERE employee_id = ? ORDER BY payroll_month DESC LIMIT 1'
+  ).bind(decoded).first<PayrollRow>();
+  if (byEmployee) return byEmployee;
+
+  const id = Number(decoded);
+  if (!Number.isSafeInteger(id) || id < 1 || String(id) !== decoded) return null;
+  return env.DB.prepare('SELECT * FROM payroll WHERE id = ?').bind(id).first<PayrollRow>();
 }
 
 async function payrollRoutes(request: Request, env: Env, segments: string[]): Promise<Response> {
@@ -472,31 +588,38 @@ async function payrollRoutes(request: Request, env: Env, segments: string[]): Pr
 
   if (segments.length === 1 && method === 'POST') {
     const payroll = readPayroll(await readJson(request));
+    payroll.employeeId = await resolveEmployeeId(env.DB, payroll.employeeId);
     try {
       const result = await env.DB.prepare(`
         INSERT INTO payroll
           (employee_id, payroll_month, basic_salary_cents, allowances_cents, deductions_cents, net_salary_cents)
-        VALUES (?, ?, ?, ?, ?, ?) RETURNING *
+        VALUES (?, ?, ?, ?, ?, ?)
+        ON CONFLICT(employee_id, payroll_month) DO UPDATE SET
+          basic_salary_cents = excluded.basic_salary_cents,
+          allowances_cents = excluded.allowances_cents,
+          deductions_cents = excluded.deductions_cents,
+          net_salary_cents = excluded.net_salary_cents
+        RETURNING *
       `).bind(payroll.employeeId, payroll.payrollMonth, payroll.basicSalary, payroll.allowances,
         payroll.deductions, payroll.netSalary).first<PayrollRow>();
-      return json({ message: 'Payroll created successfully', data: result && mapPayroll(result) }, 201);
+      return json({ message: 'Payroll saved successfully', data: result && mapPayroll(result) }, 201);
     } catch (error) {
-      if (isDatabaseConflict(error)) fail(400, 'Employee does not exist');
+      if (isDatabaseConflict(error)) fail(400, 'Employee does not exist. Use an employee ID from the Employees page.');
       throw error;
     }
   }
 
   if (segments.length === 2 && ['PUT', 'DELETE'].includes(method)) {
-    const id = Number(segments[1]);
-    if (!Number.isSafeInteger(id) || id < 1) fail(400, 'Payroll ID is invalid');
-    const current = await env.DB.prepare('SELECT id FROM payroll WHERE id = ?').bind(id).first();
+    const current = await findPayroll(env, segments[1]);
     if (!current) fail(404, 'Payroll record not found');
+    const id = current.id;
     if (method === 'DELETE') {
       await env.DB.prepare('DELETE FROM payroll WHERE id = ?').bind(id).run();
       return json({ message: 'Payroll deleted successfully' });
     }
 
     const payroll = readPayroll(await readJson(request));
+    payroll.employeeId = await resolveEmployeeId(env.DB, payroll.employeeId);
     try {
       const result = await env.DB.prepare(`
         UPDATE payroll
@@ -540,14 +663,15 @@ async function readDocument(request: Request): Promise<DocumentInput> {
     body = await readJson(request);
   }
 
-  const rawName = file?.name || body.file_name;
+  const rawName = file?.name || body.file_name || body.fileName;
   const fileName = typeof rawName === 'string' ? rawName.split(/[\\/]/).pop()?.trim() : '';
   if (!fileName || fileName.length > 180) fail(400, 'file_name is required and must be at most 180 characters');
+  const rawEmployeeId = body.employee_id ?? body.employeeId ?? body.emp_id;
   return {
-    employeeId: textField(body, 'employee_id', 20),
-    docType: textField(body, 'doc_type', 100),
-    docName: textField(body, 'doc_name', 255),
-    issueDate: dateField(body.issue_date, 'issue_date'),
+    employeeId: textField({ employee_id: rawEmployeeId == null ? '' : String(rawEmployeeId).trim() }, 'employee_id', 80),
+    docType: textField({ doc_type: body.doc_type ?? body.docType }, 'doc_type', 100),
+    docName: textField({ doc_name: body.doc_name ?? body.docName }, 'doc_name', 255),
+    issueDate: dateField(body.issue_date ?? body.issueDate, 'issue_date'),
     fileName,
     file
   };
@@ -582,6 +706,7 @@ async function documentRoutes(request: Request, env: Env, segments: string[]): P
 
   if (segments.length === 1 && method === 'POST') {
     const document = await readDocument(request);
+    document.employeeId = await resolveEmployeeId(env.DB, document.employeeId);
     const objectKey = document.file ? `${crypto.randomUUID()}/${document.fileName}` : null;
     if (document.file && objectKey) {
       await documentsBucket(env).put(objectKey, document.file, {
@@ -631,6 +756,7 @@ async function documentRoutes(request: Request, env: Env, segments: string[]): P
     }
 
     const document = await readDocument(request);
+    document.employeeId = await resolveEmployeeId(env.DB, document.employeeId);
     const objectKey = document.file ? `${crypto.randomUUID()}/${document.fileName}` : current.object_key;
     if (document.file && objectKey) {
       await documentsBucket(env).put(objectKey, document.file, {

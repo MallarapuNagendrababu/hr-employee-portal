@@ -21,9 +21,10 @@ export default function DocumentsPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null as string | null);
   const [editingId, setEditingId] = useState(null as number | null);
+  const [employees, setEmployees] = useState([] as { emp_id: string; first_name: string; last_name: string }[]);
 
   function openAdd() {
-    setEmployeeId('');
+    setEmployeeId(employees[0]?.emp_id ?? '');
     setDocumentType('ID Proof');
     setDocumentName('');
     setIssueDate('');
@@ -76,7 +77,10 @@ export default function DocumentsPage() {
             body: JSON.stringify(payload)
           });
 
-          if (!res.ok) throw new Error(`Create failed (${res.status})`);
+          if (!res.ok) {
+            const failure = (await res.json().catch(() => null)) as { message?: string } | null;
+            throw new Error(failure?.message ?? `Create failed (${res.status})`);
+          }
 
           const data = await res.json();
           // server returns created item in data
@@ -103,7 +107,7 @@ export default function DocumentsPage() {
     setSelectedFileName(file?.name ?? '');
   }
 
-  function handleEmployeeIdChange(event: ChangeEvent<HTMLInputElement>) {
+  function handleEmployeeIdChange(event: ChangeEvent<HTMLSelectElement>) {
     setEmployeeId(event.target.value);
   }
 
@@ -136,6 +140,21 @@ export default function DocumentsPage() {
 
   useEffect(() => {
     loadDocuments();
+    fetch(apiRoutes.employees)
+      .then((response) => (response.ok ? response.json() : null))
+      .then((result: { data?: { emp_id: string; first_name?: string; last_name?: string }[] } | null) => {
+        const options = Array.isArray(result?.data)
+          ? result.data
+              .map((item) => ({
+                emp_id: String(item.emp_id).trim(),
+                first_name: String(item.first_name ?? ''),
+                last_name: String(item.last_name ?? '')
+              }))
+              .filter((item) => item.emp_id.length > 0)
+          : [];
+        setEmployees(options);
+      })
+      .catch(() => undefined);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -243,13 +262,14 @@ export default function DocumentsPage() {
         >
           <label>
             Employee ID
-            <input
-              type="text"
-              value={employeeId}
-              onChange={handleEmployeeIdChange}
-              placeholder="Enter employee ID"
-              required
-            />
+            <select value={employeeId} onChange={handleEmployeeIdChange} required>
+              <option value="">Select an employee</option>
+              {employees.map((employee) => (
+                <option key={employee.emp_id} value={employee.emp_id}>
+                  {employee.emp_id} — {employee.first_name} {employee.last_name}
+                </option>
+              ))}
+            </select>
           </label>
 
           <label>
